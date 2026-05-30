@@ -1,4 +1,10 @@
+import 'dart:async';
+import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
+import 'package:flutter_hbb/models/platform_model.dart';
+import 'package:flutter_hbb/models/green4you_api.dart';
+import 'package:flutter_hbb/models/green4you_store.dart';
 
 // Home page "appliance" di Green4You Assist (Fase 4 §7.1).
 // PROTOTIPO UI: stati e dati sono stub locali; i bottoni puntano a callback
@@ -58,12 +64,66 @@ class Green4YouHomePage extends StatefulWidget {
 }
 
 class _Green4YouHomePageState extends State<Green4YouHomePage> {
-  // --- Stub (verranno da Keychain/device_token + API) ---
   ApplianceState _state = ApplianceState.idle;
-  final String _userName = 'Marco'; // da registrazione §4.1
-  final String _adminName = 'Luca'; // da deep-link connect §7.3
-  final int _sentMinutesAgo = 1;
-  final int _expiresInMinutes = 14;
+  String _userName = '';
+  String _adminName = '';
+  String? _peerId;
+  String? _richiestaToken;
+  bool _wasAnonymous = false;
+  bool _busy = false;
+  DateTime? _requestSentAt;
+  int _timeoutSeconds = 900; // da ts_scadenza/timeout_secondi della risposta
+  Timer? _pollTimer; // polling stato-richiesta / recupera-credenziali
+  Timer? _tick; // refresh del countdown in schermata C
+
+  static const String _appVersion = '1.0.0';
+
+  @override
+  void initState() {
+    super.initState();
+    _init();
+  }
+
+  @override
+  void dispose() {
+    _pollTimer?.cancel();
+    _tick?.cancel();
+    super.dispose();
+  }
+
+  /// Stato iniziale: B se registrato (device_token in Keychain), altrimenti A.
+  Future<void> _init() async {
+    final peerId = await bind.mainGetMyId();
+    final registered = await Green4YouStore.isRegistered();
+    final name = await Green4YouStore.userName();
+    if (!mounted) return;
+    setState(() {
+      _peerId = peerId;
+      _userName = name ?? '';
+      _state = registered ? ApplianceState.idle : ApplianceState.unregistered;
+    });
+  }
+
+  String get _hostname {
+    try {
+      return Platform.localHostname;
+    } catch (_) {
+      return 'PC';
+    }
+  }
+
+  String get _so => Platform.operatingSystem; // macos | windows | linux
+
+  /// Riga "Inviata X fa · scade tra Y min" della schermata C.
+  String get _requestStatusLine {
+    if (_requestSentAt == null) return '';
+    final elapsed = DateTime.now().difference(_requestSentAt!);
+    final agoMin = elapsed.inMinutes;
+    final remaining = _timeoutSeconds - elapsed.inSeconds;
+    final remMin = (remaining / 60).ceil().clamp(0, 999);
+    final agoStr = agoMin <= 0 ? 'pochi secondi fa' : 'circa $agoMin min fa';
+    return 'Inviata $agoStr · scade tra $remMin min';
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -234,7 +294,7 @@ class _Green4YouHomePageState extends State<Green4YouHomePage> {
       children: [
         _logoHeader(context),
         const SizedBox(height: 24),
-        Text('Ciao $_userName 👋',
+        Text(_userName.isEmpty ? 'Ciao 👋' : 'Ciao $_userName 👋',
             style: Theme.of(context)
                 .textTheme
                 .titleMedium
@@ -285,7 +345,7 @@ class _Green4YouHomePageState extends State<Green4YouHomePage> {
         _outlineButton('Annulla richiesta', _onCancelRequest,
             color: Colors.redAccent),
         const SizedBox(height: 14),
-        Text('Inviata $_sentMinutesAgo min fa · scade tra $_expiresInMinutes min',
+        Text(_requestStatusLine,
             style: Theme.of(context)
                 .textTheme
                 .bodySmall
@@ -353,29 +413,212 @@ class _Green4YouHomePageState extends State<Green4YouHomePage> {
   // ---------------------------------------------------------------------------
   // Callback (PROTOTIPO: per ora navigano tra gli stati; niente API reali)
   // ---------------------------------------------------------------------------
-  void _onRequestAssistance() {
-    // TODO(API): POST /api/v2/richiedi-assistenza.php (o -anonima per stato A)
-    setState(() => _state = ApplianceState.requesting);
+  /// Richiedi assistenza — da B (registrato) o A (anonima). La scelta dipende
+  /// dalla presenza del device_token in Keychain.
+  Future<void> _onRequestAssistance() async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    try {
+      final token = await Green4YouStore.deviceToken();
+      Map<String, dynamic> res;
+      if (token != null && token.isNotEmpty) {
+        res = await Green4YouApi.richiediAssistenza(deviceToken: token);
+        _wasAnonymous = false;
+      } else {
+        res = await Green4YouApi.richiediAssistenzaAnonima(
+          peerId: _peerId ?? '',
+          hostname: _hostname,
+          sistemaOperativo: _so,
+          versioneApp: _appVersion,
+        );
+        _wasAnonymous = true;
+      }
+      _richiestaToken = res['richiesta_token'] as String?;
+      _requestSentAt = DateTime.now();
+      final t = res['timeout_secondi'];
+      if (t is int) _timeoutSeconds = t;
+      if (_richiestaToken == null) {
+        _showError('Risposta inattesa dal server.');
+        return;
+      }
+      setState(() => _state = ApplianceState.requesting);
+      _startPolling();
+      _startTick();
+    } catch (_) {
+      _showError('Impossibile inviare la richiesta. Controlla la connessione.');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
-  void _onRegisterDevice() {
-    // TODO(API+deeplink): apri browser su URL §6.2, attendi green4youassist://registered
-    debugPrint('[Green4You] Avvio flusso registrazione (§4.1) — stub');
+  /// Registra questo PC (§4.1): genera nonce, apre il browser sulla pagina di
+  /// conferma Kairos, poi fa polling di recupera-credenziali finché l'utente
+  /// conferma; salva device_token+password+nome in Keychain.
+  Future<void> _onRegisterDevice() async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    try {
+      final nonce = await Green4YouApi.generaNonce(
+        peerId: _peerId ?? '',
+        hostname: _hostname,
+        sistemaOperativo: _so,
+        versioneApp: _appVersion,
+      );
+      final url =
+          'https://crm.green4you.cloud/kairos/modules/assistenza_remota/registra-dispositivo.php?nonce=$nonce';
+      await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+      _pollRegistration(nonce);
+    } catch (_) {
+      _showError('Registrazione non riuscita. Riprova.');
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
-  void _onCancelRequest() {
-    // TODO(API): POST /api/v2/annulla-richiesta.php
-    setState(() => _state = ApplianceState.idle);
+  void _pollRegistration(String nonce) {
+    _pollTimer?.cancel();
+    int attempts = 0;
+    _pollTimer = Timer.periodic(const Duration(seconds: 3), (t) async {
+      attempts++;
+      if (attempts > 100) {
+        // il nonce scade in ~5 min: smetti di attendere
+        t.cancel();
+        if (mounted) setState(() => _busy = false);
+        return;
+      }
+      Map<String, dynamic>? creds;
+      try {
+        creds = await Green4YouApi.recuperaCredenziali(nonce);
+      } catch (_) {
+        return;
+      }
+      if (creds != null && creds['device_token'] != null) {
+        t.cancel();
+        final utente = creds['utente_kairos'];
+        final name =
+            utente is Map ? utente['nome_da_mostrare'] as String? : null;
+        await Green4YouStore.saveCredentials(
+          deviceToken: creds['device_token'] as String,
+          password: creds['password_permanente_cliente'] as String?,
+          userName: name,
+        );
+        if (!mounted) return;
+        setState(() {
+          _userName = name ?? '';
+          _state = ApplianceState.idle;
+          _busy = false;
+        });
+      }
+    });
+  }
+
+  Future<void> _onCancelRequest() async {
+    _pollTimer?.cancel();
+    _tick?.cancel();
+    final token = _richiestaToken;
+    if (token != null) {
+      try {
+        await Green4YouApi.annullaRichiesta(token);
+      } catch (_) {}
+    }
+    if (!mounted) return;
+    setState(() => _state =
+        _wasAnonymous ? ApplianceState.unregistered : ApplianceState.idle);
+  }
+
+  /// Polling stato richiesta (§4.2): in_attesa -> C, accettata/attiva -> D,
+  /// stati terminali -> torna a B/A.
+  void _startPolling() {
+    _pollTimer?.cancel();
+    _pollTimer = Timer.periodic(const Duration(seconds: 4), (t) async {
+      final token = _richiestaToken;
+      if (token == null) {
+        t.cancel();
+        return;
+      }
+      Map<String, dynamic> s;
+      try {
+        s = await Green4YouApi.statoRichiesta(token);
+      } catch (_) {
+        return;
+      }
+      if (!mounted) return;
+      final stato = s['stato'] as String?;
+      final adminNome = s['admin_nome'] as String?;
+      switch (stato) {
+        case 'in_attesa':
+          break;
+        case 'accettata':
+        case 'attiva':
+          setState(() {
+            _adminName = (adminNome != null && adminNome.isNotEmpty)
+                ? adminNome
+                : 'un amministratore';
+            _state = ApplianceState.sessionActive;
+          });
+          break;
+        case 'completata':
+        case 'rifiutata':
+        case 'timeout':
+        case 'annullata':
+        case 'errore':
+          t.cancel();
+          _tick?.cancel();
+          setState(() => _state = _wasAnonymous
+              ? ApplianceState.unregistered
+              : ApplianceState.idle);
+          break;
+      }
+    });
+  }
+
+  void _startTick() {
+    _tick?.cancel();
+    _tick = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted && _state == ApplianceState.requesting) setState(() {});
+    });
   }
 
   void _onOpenSettings() {
-    // TODO: dialog Impostazioni [Esci da questo account] [Quit] [About]
-    debugPrint('[Green4You] Apertura impostazioni — stub');
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Impostazioni'),
+        content: const Text('Green4You Assist 1.0.0'),
+        actions: [
+          TextButton(
+            onPressed: () async {
+              Navigator.of(context).pop();
+              await Green4YouStore.clear();
+              if (!mounted) return;
+              setState(() {
+                _userName = '';
+                _state = ApplianceState.unregistered;
+              });
+            },
+            child: const Text('Esci da questo account',
+                style: TextStyle(color: Colors.redAccent)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Chiudi'),
+          ),
+        ],
+      ),
+    );
   }
 
   void _onEndSession() {
-    // TODO: chiudi la sessione RustDesk attiva
-    setState(() => _state = ApplianceState.idle);
+    // TODO(Fase 2): chiudere realmente la connessione RustDesk in entrata.
+    _pollTimer?.cancel();
+    setState(() => _state =
+        _wasAnonymous ? ApplianceState.unregistered : ApplianceState.idle);
+  }
+
+  void _showError(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(msg), behavior: SnackBarBehavior.floating),
+    );
   }
 
   // ---------------------------------------------------------------------------

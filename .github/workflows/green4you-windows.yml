@@ -125,13 +125,26 @@ jobs:
           fi
 
       - name: Build Green4You Assist (Flutter + Rust)
+        shell: pwsh
         run: |
-          python3 .\build.py --flutter
-          if (!(Test-Path ".\flutter\build\windows\x64\runner\Release\${{ 'rustdesk.exe' }}")) {
-            Write-Error "Build non trovata: rustdesk.exe assente nella cartella Release"
+          # --skip-portable-pack: non serve il self-extractor RustDesk, impacchettiamo
+          # con NSIS. Evita anche pip3/generate.py (causa dell'exit-code 1 spurio).
+          python3 build.py --flutter --skip-portable-pack
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "build.py terminato con exit code $LASTEXITCODE"
             exit 1
           }
-          mv .\flutter\build\windows\x64\runner\Release .\green4you
+          $rel = "flutter/build/windows/x64/runner/Release"
+          if (-not (Test-Path "$rel/rustdesk.exe")) {
+            Write-Error "Build non trovata: rustdesk.exe assente in $rel"
+            exit 1
+          }
+          # Copy-Item (cmdlet) non eredita $LASTEXITCODE: chiudiamo con exit 0 esplicito.
+          New-Item -ItemType Directory -Force -Path green4you | Out-Null
+          Copy-Item -Path "$rel/*" -Destination green4you -Recurse -Force
+          Write-Host "Contenuto cartella green4you:"
+          Get-ChildItem green4you | Select-Object Name, Length | Format-Table -AutoSize
+          exit 0
 
       - name: Upload build folder
         uses: actions/upload-artifact@v4
@@ -148,6 +161,7 @@ jobs:
           $setup = Get-ChildItem res\nsis\Green4You-Assist-*-Setup.exe | Select-Object -First 1
           if (!$setup) { Write-Error "Installer NSIS non generato"; exit 1 }
           Write-Host "Installer: $($setup.FullName) ($([math]::Round($setup.Length/1MB,1)) MB)"
+          exit 0
 
       - name: Upload installer
         uses: actions/upload-artifact@v4

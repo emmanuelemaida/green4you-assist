@@ -443,14 +443,16 @@ class _Green4YouHomePageState extends State<Green4YouHomePage> {
   /// "Assisti" (disabilitato/spinner mentre si avvia un'altra sessione).
   Widget _queueCard(BuildContext context, Map<String, dynamic> r) {
     final id = r['richiesta_id'] as int?;
-    final nome = (r['collaboratore_nome'] as String?)?.trim();
+    // Contratto E2E: nome in utente.nome_da_mostrare; tolleriamo anche un
+    // eventuale collaboratore_nome piatto per robustezza.
+    final utente = r['utente'];
+    final nome = ((utente is Map ? utente['nome_da_mostrare'] : null) ??
+            r['collaboratore_nome']) as String?;
     final hostname = (r['hostname'] as String?)?.trim();
     final so = (r['sistema_operativo'] as String?)?.trim();
-    final nota = (r['nota_collaboratore'] as String?)?.trim();
-    final attesa = r['secondi_attesa'];
-    final attesaStr = (attesa is int && attesa > 0)
-        ? (attesa < 60 ? '${attesa}s fa' : '${(attesa / 60).floor()} min fa')
-        : null;
+    final nota =
+        ((r['note_collaboratore'] ?? r['nota_collaboratore']) as String?)
+            ?.trim();
     final thisBusy = _assistingId == id;
     final otherBusy = _assistingId != null && !thisBusy;
     return Card(
@@ -469,20 +471,20 @@ class _Green4YouHomePageState extends State<Green4YouHomePage> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(nome?.isNotEmpty == true ? nome! : 'Collaboratore',
+                  Text(nome?.trim().isNotEmpty == true ? nome!.trim() : 'Collaboratore',
                       style: const TextStyle(fontWeight: FontWeight.w600)),
                   const SizedBox(height: 2),
-                  Text(
-                    [
-                      if (hostname?.isNotEmpty == true) hostname,
-                      if (so?.isNotEmpty == true) so,
-                      if (attesaStr != null) attesaStr,
-                    ].join(' · '),
-                    style: Theme.of(context)
-                        .textTheme
-                        .bodySmall
-                        ?.copyWith(color: Colors.grey),
-                  ),
+                  if (hostname?.isNotEmpty == true || so?.isNotEmpty == true)
+                    Text(
+                      [
+                        if (hostname?.isNotEmpty == true) hostname,
+                        if (so?.isNotEmpty == true) so,
+                      ].join(' · '),
+                      style: Theme.of(context)
+                          .textTheme
+                          .bodySmall
+                          ?.copyWith(color: Colors.grey),
+                    ),
                   if (nota?.isNotEmpty == true) ...[
                     const SizedBox(height: 6),
                     Text(nota!,

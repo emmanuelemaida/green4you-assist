@@ -149,9 +149,9 @@ class Green4YouApi {
   // ---------------------------------------------------------------------------
 
   /// Coda delle richieste in attesa che l'admin può accettare. Ritorna la lista
-  /// (eventualmente vuota) dal campo `richieste`. Ogni elemento contiene:
-  /// {richiesta_id, collaboratore_nome, hostname, sistema_operativo,
-  ///  nota_collaboratore, ts_richiesta, secondi_attesa}.
+  /// (eventualmente vuota) dal campo `richieste`. Ogni elemento (contratto E2E):
+  /// {richiesta_id, tipo_richiesta, utente:{nome_da_mostrare}, hostname,
+  ///  note_collaboratore, ts}.
   static Future<List<Map<String, dynamic>>> richiesteInAttesa(
       String deviceToken) async {
     final r = await http.get(

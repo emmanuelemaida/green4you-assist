@@ -10,6 +10,37 @@ import 'package:flutter/material.dart';
 const Color kGreen4You = Color(0xFF4BA078);
 const Color kGreen4YouDark = Color(0xFF1E3C43);
 
+/// Un passo della mini-guida "Come funziona" (carosello §guida interna).
+class _GuideStep {
+  final IconData icon;
+  final String title;
+  final String text;
+  const _GuideStep(this.icon, this.title, this.text);
+}
+
+const List<_GuideStep> _guideSteps = [
+  _GuideStep(
+    Icons.support_agent,
+    'Hai un problema?',
+    'Clicca "Richiedi assistenza": avvisi il supporto Green4You che ti serve aiuto.',
+  ),
+  _GuideStep(
+    Icons.phone_in_talk,
+    'Tieni il telefono a portata',
+    'Un amministratore ti contatta per capire cosa non va.',
+  ),
+  _GuideStep(
+    Icons.desktop_windows,
+    'L\'amministratore si collega',
+    'Vede il tuo schermo per aiutarti dal vivo. Un banner verde ti mostra sempre quando la sessione è attiva.',
+  ),
+  _GuideStep(
+    Icons.verified_user,
+    'Sei sempre tu al controllo',
+    'Nessuno entra senza la tua richiesta, e puoi terminare la sessione quando vuoi.',
+  ),
+];
+
 /// Le 5 schermate mutuamente esclusive della spec §7.1.
 enum ApplianceState {
   unregistered, // A — manca device_token
@@ -45,6 +76,15 @@ class _Green4YouHomePageState extends State<Green4YouHomePage> {
         children: [
           Positioned.fill(child: Center(child: _buildBody(context))),
           if (_isInSession) _buildSessionBanner(context),
+          // "Come funziona?" ancorato in basso al centro (schermate A e B).
+          if (_state == ApplianceState.unregistered ||
+              _state == ApplianceState.idle)
+            Positioned(
+              bottom: 8,
+              left: 0,
+              right: 0,
+              child: Center(child: _guideLink(context)),
+            ),
           _buildDevSwitcher(context), // solo prototipo
         ],
       ),
@@ -139,6 +179,24 @@ class _Green4YouHomePageState extends State<Green4YouHomePage> {
     );
   }
 
+  /// Link discreto "Come funziona?" che apre il carosello guida.
+  Widget _guideLink(BuildContext context) {
+    return TextButton.icon(
+      icon: const Icon(Icons.help_outline, size: 16),
+      label: const Text('Come funziona?'),
+      style: TextButton.styleFrom(foregroundColor: kGreen4You),
+      onPressed: () => _showGuide(context),
+    );
+  }
+
+  void _showGuide(BuildContext context) {
+    showDialog(
+      context: context,
+      barrierDismissible: true,
+      builder: (_) => const _GuideDialog(),
+    );
+  }
+
   // ---------------------------------------------------------------------------
   // (A) Non registrato
   // ---------------------------------------------------------------------------
@@ -155,7 +213,7 @@ class _Green4YouHomePageState extends State<Green4YouHomePage> {
         _primaryButton('Richiedi assistenza', _onRequestAssistance),
         const SizedBox(height: 12),
         _outlineButton('Registra questo PC', _onRegisterDevice),
-        const SizedBox(height: 28),
+        const SizedBox(height: 24),
         Text(
           'Versione 1.0.0 — sorgenti: github.com/emmanuelemaida/green4you-assist',
           style: Theme.of(context)
@@ -186,7 +244,7 @@ class _Green4YouHomePageState extends State<Green4YouHomePage> {
             style: Theme.of(context).textTheme.bodyMedium),
         const SizedBox(height: 28),
         _primaryButton('Richiedi assistenza', _onRequestAssistance),
-        const SizedBox(height: 22),
+        const SizedBox(height: 16),
         TextButton.icon(
           icon: const Icon(Icons.settings, size: 16),
           label: const Text('Impostazioni'),
@@ -360,6 +418,154 @@ class _Green4YouHomePageState extends State<Green4YouHomePage> {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// Carosello guida "Come funziona" — 4 card scorrevoli con pallini e bottone.
+class _GuideDialog extends StatefulWidget {
+  const _GuideDialog();
+
+  @override
+  State<_GuideDialog> createState() => _GuideDialogState();
+}
+
+class _GuideDialogState extends State<_GuideDialog> {
+  final PageController _controller = PageController();
+  int _page = 0;
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  bool get _isLast => _page == _guideSteps.length - 1;
+
+  void _next() {
+    if (_isLast) {
+      Navigator.of(context).pop();
+    } else {
+      _controller.nextPage(
+        duration: const Duration(milliseconds: 280),
+        curve: Curves.easeInOut,
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final cardBg =
+        isDark ? Theme.of(context).colorScheme.surface : Colors.white;
+    return Dialog(
+      backgroundColor: cardBg,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: SizedBox(
+        width: 330,
+        height: 400,
+        child: Column(
+          children: [
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                style: TextButton.styleFrom(foregroundColor: Colors.grey),
+                child: const Text('Salta'),
+              ),
+            ),
+            Expanded(
+              child: PageView.builder(
+                controller: _controller,
+                itemCount: _guideSteps.length,
+                onPageChanged: (i) => setState(() => _page = i),
+                itemBuilder: (_, i) => _buildCard(context, _guideSteps[i]),
+              ),
+            ),
+            _buildDots(),
+            const SizedBox(height: 12),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 18),
+              child: SizedBox(
+                width: double.infinity,
+                height: 46,
+                child: ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: kGreen4You,
+                    foregroundColor: Colors.white,
+                    elevation: 0,
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10)),
+                  ),
+                  onPressed: _next,
+                  child: Text(_isLast ? 'Ho capito' : 'Avanti',
+                      style: const TextStyle(
+                          fontSize: 15, fontWeight: FontWeight.w600)),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCard(BuildContext context, _GuideStep step) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 28),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Container(
+            width: 88,
+            height: 88,
+            decoration: const BoxDecoration(
+              color: kGreen4You,
+              shape: BoxShape.circle,
+            ),
+            child: Icon(step.icon, size: 44, color: Colors.white),
+          ),
+          const SizedBox(height: 22),
+          Text(
+            step.title,
+            textAlign: TextAlign.center,
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w600,
+                  color: Theme.of(context).brightness == Brightness.dark
+                      ? null
+                      : kGreen4YouDark,
+                ),
+          ),
+          const SizedBox(height: 12),
+          Text(
+            step.text,
+            textAlign: TextAlign.center,
+            style: Theme.of(context)
+                .textTheme
+                .bodyMedium
+                ?.copyWith(color: Colors.grey[600], height: 1.35),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDots() {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: List.generate(_guideSteps.length, (i) {
+        final active = i == _page;
+        return AnimatedContainer(
+          duration: const Duration(milliseconds: 220),
+          margin: const EdgeInsets.symmetric(horizontal: 3),
+          width: active ? 18 : 7,
+          height: 7,
+          decoration: BoxDecoration(
+            color: active ? kGreen4You : Colors.grey.withOpacity(0.35),
+            borderRadius: BorderRadius.circular(4),
+          ),
+        );
+      }),
     );
   }
 }

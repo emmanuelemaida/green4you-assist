@@ -2489,11 +2489,12 @@ fn is_option_can_save(
 
 #[inline]
 pub fn is_incoming_only() -> bool {
-    HARD_SETTINGS
-        .read()
-        .unwrap()
-        .get("conn-type")
-        .map_or(false, |x| x == ("incoming"))
+    // Green4You Assist è un client di sola ricezione: l'unica connessione in
+    // uscita avviene via deep-link green4youassist://connect (orchestrato dal
+    // server), che bypassa la UI. Forziamo quindi la modalità incoming-only di
+    // RustDesk, che nasconde rubrica/peer list/campo "Connect to ID"/impostazioni
+    // server. (Spec Fase 4 §7.2)
+    true
 }
 
 #[inline]

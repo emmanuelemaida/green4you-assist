@@ -411,11 +411,11 @@ def build_flutter_dmg(version, features):
         "cp target/release/liblibrustdesk.dylib target/release/librustdesk.dylib")
     os.chdir('flutter')
     system2('flutter build macos --release')
-    system2('cp -rf ../target/release/service ./build/macos/Build/Products/Release/RustDesk.app/Contents/MacOS/')
+    system2('cp -rf ../target/release/service "./build/macos/Build/Products/Release/Green4You Assist.app/Contents/MacOS/"')
     '''
     system2(
-        "create-dmg --volname \"RustDesk Installer\" --window-pos 200 120 --window-size 800 400 --icon-size 100 --app-drop-link 600 185 --icon RustDesk.app 200 190 --hide-extension RustDesk.app rustdesk.dmg ./build/macos/Build/Products/Release/RustDesk.app")
-    os.rename("rustdesk.dmg", f"../rustdesk-{version}.dmg")
+        "create-dmg --volname \"Green4You Assist Installer\" --window-pos 200 120 --window-size 800 400 --icon-size 100 --app-drop-link 600 185 --icon \"Green4You Assist.app\" 200 190 --hide-extension \"Green4You Assist.app\" \"Green4You Assist.dmg\" \"./build/macos/Build/Products/Release/Green4You Assist.app\"")
+    os.rename("Green4You Assist.dmg", "../Green4You Assist.dmg")
     '''
     os.chdir("..")
 

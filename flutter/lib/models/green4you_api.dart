@@ -30,10 +30,25 @@ class Green4YouApi {
     String detail = r.body;
     try {
       final j = jsonDecode(r.body);
-      if (j is Map && (j['errore'] ?? j['messaggio'] ?? j['message']) != null) {
-        detail = '${j['errore'] ?? j['messaggio'] ?? j['message']}';
-      }
+      // Il backend usa 'error' (en) sugli endpoint admin, 'errore'/'messaggio'/
+      // 'message' altrove: li proviamo tutti.
+      final m = j is Map
+          ? (j['error'] ?? j['errore'] ?? j['messaggio'] ?? j['message'])
+          : null;
+      if (m != null) detail = '$m';
     } catch (_) {}
+    // 401 sugli endpoint admin = device non autorizzato come admin: messaggio
+    // chiaro e azionabile invece dello status grezzo.
+    const adminOps = {
+      'richieste-in-attesa',
+      'avvia-sessione',
+      'preleva-credenziali-sessione',
+    };
+    if (r.statusCode == 401 && adminOps.contains(op)) {
+      throw 'Questo dispositivo non è autorizzato come amministratore.\n'
+          'Contatta un amministratore Green4You per abilitarlo.\n\n'
+          '($op: HTTP 401 — $detail)';
+    }
     throw '$op: HTTP ${r.statusCode}\n$detail';
   }
 

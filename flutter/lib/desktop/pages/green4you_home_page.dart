@@ -161,7 +161,6 @@ class _Green4YouHomePageState extends State<Green4YouHomePage> {
               right: 0,
               child: Center(child: _guideLink(context)),
             ),
-          _buildDevSwitcher(context), // solo prototipo
         ],
       ),
     );

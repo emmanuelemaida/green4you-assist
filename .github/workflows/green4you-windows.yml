@@ -22,6 +22,12 @@ on:
       - "build.py"
       - ".github/workflows/green4you-windows.yml"
 
+# Un nuovo push sullo stesso branch annulla la build precedente ancora in corso
+# (evita build duplicate che competono per i runner).
+concurrency:
+  group: green4you-windows-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   RUST_VERSION: "1.75"
   LLVM_VERSION: "15.0.6"

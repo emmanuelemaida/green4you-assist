@@ -977,49 +977,6 @@ class _Green4YouHomePageState extends State<Green4YouHomePage> {
       ),
     ).then((_) => _errorVisible = false);
   }
-
-  // ---------------------------------------------------------------------------
-  // Pannellino DEV per ciclare gli stati (RIMUOVERE prima del rilascio)
-  // ---------------------------------------------------------------------------
-  Widget _buildDevSwitcher(BuildContext context) {
-    Widget chip(String label, ApplianceState s) => Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 2),
-          child: InkWell(
-            onTap: () => setState(() => _state = s),
-            child: Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              decoration: BoxDecoration(
-                color: _state == s ? kGreen4You : Colors.grey.withOpacity(0.3),
-                borderRadius: BorderRadius.circular(6),
-              ),
-              child: Text(label,
-                  style: TextStyle(
-                      fontSize: 11,
-                      color: _state == s ? Colors.white : Colors.black54)),
-            ),
-          ),
-        );
-    return Positioned(
-      bottom: 6,
-      right: 6,
-      child: Opacity(
-        opacity: 0.75,
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Text('DEV ',
-                style: TextStyle(fontSize: 10, color: Colors.grey)),
-            chip('A', ApplianceState.unregistered),
-            chip('B', ApplianceState.idle),
-            chip('C', ApplianceState.requesting),
-            chip('D', ApplianceState.sessionActive),
-            chip('E', ApplianceState.anonymousIdentifying),
-          ],
-        ),
-      ),
-    );
-  }
 }
 
 /// Carosello guida "Come funziona" — 4 card scorrevoli con pallini e bottone.

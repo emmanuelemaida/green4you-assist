@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:flutter_hbb/models/platform_model.dart';
 import 'package:flutter_hbb/models/green4you_api.dart';
@@ -77,6 +78,7 @@ class _Green4YouHomePageState extends State<Green4YouHomePage> {
   Timer? _tick; // refresh del countdown in schermata C
   bool _registering = false; // polling registrazione in corso (schermata A)
   int _regSecondsLeft = 600; // countdown conferma registrazione (dal 202)
+  bool _errorVisible = false; // evita dialog d'errore impilati
 
   static const String _appVersion = '1.0.0';
 
@@ -472,8 +474,8 @@ class _Green4YouHomePageState extends State<Green4YouHomePage> {
       setState(() => _state = ApplianceState.requesting);
       _startPolling();
       _startTick();
-    } catch (_) {
-      _showError('Impossibile inviare la richiesta. Controlla la connessione.');
+    } catch (e) {
+      _showError('Impossibile inviare la richiesta.\n\n$e');
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -502,8 +504,8 @@ class _Green4YouHomePageState extends State<Green4YouHomePage> {
           'https://crm.green4you.cloud/kairos/modules/assistenza_remota/registra-dispositivo.php?nonce=$nonce';
       await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
       _pollRegistration(nonce);
-    } catch (_) {
-      _showError('Registrazione non riuscita. Riprova.');
+    } catch (e) {
+      _showError('Registrazione non riuscita.\n\n$e');
       if (mounted) setState(() => _registering = false);
     }
   }
@@ -671,11 +673,45 @@ class _Green4YouHomePageState extends State<Green4YouHomePage> {
         _wasAnonymous ? ApplianceState.unregistered : ApplianceState.idle);
   }
 
+  /// Errore PERSISTENTE, leggibile e copiabile (per inoltrarlo a un admin).
+  /// Niente SnackBar che lampeggia e sparisce.
   void _showError(String msg) {
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(msg), behavior: SnackBarBehavior.floating),
-    );
+    if (!mounted || _errorVisible) return;
+    _errorVisible = true;
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        icon: const Icon(Icons.error_outline, color: Colors.redAccent, size: 36),
+        title: const Text('Si è verificato un problema'),
+        content: SizedBox(
+          width: 340,
+          child: SelectableText(
+            msg,
+            style: const TextStyle(fontSize: 13),
+          ),
+        ),
+        actions: [
+          TextButton.icon(
+            icon: const Icon(Icons.copy, size: 16),
+            label: const Text('Copia'),
+            onPressed: () async {
+              await Clipboard.setData(ClipboardData(text: msg));
+              if (ctx.mounted) {
+                ScaffoldMessenger.of(ctx).showSnackBar(
+                  const SnackBar(
+                      content: Text('Errore copiato negli appunti'),
+                      duration: Duration(seconds: 1)),
+                );
+              }
+            },
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Chiudi'),
+          ),
+        ],
+      ),
+    ).then((_) => _errorVisible = false);
   }
 
   // ---------------------------------------------------------------------------

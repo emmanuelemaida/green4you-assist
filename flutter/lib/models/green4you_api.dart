@@ -23,6 +23,20 @@ class Green4YouApi {
         if (deviceToken != null) 'X-Device-Token': deviceToken,
       };
 
+  /// Lancia un errore descrittivo (status + body del server) se non è 2xx,
+  /// così il messaggio mostrato all'utente è leggibile/copiabile per un admin.
+  static void _checkOk(http.Response r, String op) {
+    if (r.statusCode >= 200 && r.statusCode < 300) return;
+    String detail = r.body;
+    try {
+      final j = jsonDecode(r.body);
+      if (j is Map && (j['errore'] ?? j['messaggio'] ?? j['message']) != null) {
+        detail = '${j['errore'] ?? j['messaggio'] ?? j['message']}';
+      }
+    } catch (_) {}
+    throw '$op: HTTP ${r.statusCode}\n$detail';
+  }
+
   // ---------------------------------------------------------------------------
   // Registrazione dispositivo (§4.1)
   // ---------------------------------------------------------------------------
@@ -44,6 +58,7 @@ class Green4YouApi {
         'versione_app': versioneApp,
       }),
     );
+    _checkOk(r, 'genera-nonce');
     return (jsonDecode(r.body) as Map<String, dynamic>)['nonce'] as String;
   }
 
@@ -82,6 +97,7 @@ class Green4YouApi {
       headers: _json(deviceToken),
       body: jsonEncode({'note_collaboratore': note ?? ''}),
     );
+    _checkOk(r, 'richiedi-assistenza');
     return jsonDecode(r.body) as Map<String, dynamic>;
   }
 
@@ -104,6 +120,7 @@ class Green4YouApi {
         'note_collaboratore': note ?? '',
       }),
     );
+    _checkOk(r, 'richiedi-assistenza-anonima');
     return jsonDecode(r.body) as Map<String, dynamic>;
   }
 
@@ -114,6 +131,7 @@ class Green4YouApi {
       String richiestaToken) async {
     final r =
         await http.get(_u('stato-richiesta.php?richiesta_token=$richiestaToken'));
+    _checkOk(r, 'stato-richiesta');
     return jsonDecode(r.body) as Map<String, dynamic>;
   }
 
@@ -142,6 +160,7 @@ class Green4YouApi {
       headers: _json(deviceToken),
       body: jsonEncode({'session_token': sessionToken}),
     );
+    _checkOk(r, 'preleva-credenziali-sessione');
     return jsonDecode(r.body) as Map<String, dynamic>;
   }
 }

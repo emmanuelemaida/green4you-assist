@@ -1,0 +1,150 @@
+# Build Windows di Green4You Assist: .exe Flutter + installer NSIS.
+# Versione semplificata della pipeline RustDesk (flutter-build.yml): un solo
+# target x64, niente firma/MSI/printer-driver/topmost-window. Produce come
+# artifact la cartella Release e l'installer NSIS per-utente.
+name: green4you-windows
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Versione mostrata nell'installer (es. 1.0.0)"
+        required: false
+        default: "1.0.0"
+  push:
+    branches: [feature/fase4-ui-shell]
+    paths:
+      - "src/**"
+      - "libs/**"
+      - "flutter/**"
+      - "res/nsis/**"
+      - "Cargo.*"
+      - "build.py"
+      - ".github/workflows/green4you-windows.yml"
+
+env:
+  RUST_VERSION: "1.75"
+  LLVM_VERSION: "15.0.6"
+  FLUTTER_VERSION: "3.24.5"
+  VCPKG_COMMIT_ID: "120deac3062162151622ca4860575a33844ba10b"
+  VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
+  APP_VERSION: ${{ github.event.inputs.version || '1.0.0' }}
+
+jobs:
+  # Genera i file flutter_rust_bridge (non versionati) su Linux, come fa la CI
+  # upstream; vengono scaricati dal job Windows come "bridge-artifact".
+  generate-bridge:
+    uses: ./.github/workflows/bridge.yml
+
+  build-windows:
+    needs: generate-bridge
+    runs-on: windows-2022
+    steps:
+      - name: Export GitHub Actions cache environment variables
+        uses: actions/github-script@v7
+        with:
+          script: |
+            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+
+      - name: Checkout source code
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Restore bridge files
+        # bridge.yml carica con upload-artifact@master: scarica con @master
+        # per evitare incompatibilità tra versioni dell'azione.
+        uses: actions/download-artifact@master
+        with:
+          name: bridge-artifact
+          path: ./
+
+      - name: Install LLVM and Clang
+        uses: KyleMayes/install-llvm-action@v1
+        with:
+          version: ${{ env.LLVM_VERSION }}
+
+      - name: Install flutter
+        uses: subosito/flutter-action@v2.12.0
+        with:
+          channel: "stable"
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+
+      # Workaround engine: https://github.com/flutter/flutter/issues/155685
+      - name: Replace engine with rustdesk custom flutter engine
+        run: |
+          flutter doctor -v
+          flutter precache --windows
+          Invoke-WebRequest -Uri https://github.com/rustdesk/engine/releases/download/main/windows-x64-release.zip -OutFile windows-x64-release.zip
+          Expand-Archive -Path windows-x64-release.zip -DestinationPath windows-x64-release
+          mv -Force windows-x64-release/* C:/hostedtoolcache/windows/flutter/stable-${{ env.FLUTTER_VERSION }}-x64/bin/cache/artifacts/engine/windows-x64-release/
+
+      - name: Patch flutter
+        shell: bash
+        continue-on-error: true
+        run: |
+          cp .github/patches/flutter_3.24.4_dropdown_menu_enableFilter.diff "$(dirname "$(dirname "$(which flutter)")")"
+          cd "$(dirname "$(dirname "$(which flutter)")")"
+          [[ "3.24.5" == "${{ env.FLUTTER_VERSION }}" ]] && git apply flutter_3.24.4_dropdown_menu_enableFilter.diff
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@v1
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+          targets: x86_64-pc-windows-msvc
+          components: "rustfmt"
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: green4you-windows
+
+      - name: Setup vcpkg with GitHub Actions binary cache
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgDirectory: C:\vcpkg
+          vcpkgGitCommitId: ${{ env.VCPKG_COMMIT_ID }}
+          doNotCache: false
+
+      - name: Install vcpkg dependencies
+        env:
+          VCPKG_DEFAULT_HOST_TRIPLET: x64-windows-static
+        shell: bash
+        run: |
+          if ! $VCPKG_ROOT/vcpkg install --triplet x64-windows-static --x-install-root="$VCPKG_ROOT/installed"; then
+            find "${VCPKG_ROOT}/" -name "*.log" | while read -r f; do
+              echo "$f:"; echo "======"; cat "$f"; echo "======"; echo ""
+            done
+            exit 1
+          fi
+
+      - name: Build Green4You Assist (Flutter + Rust)
+        run: |
+          python3 .\build.py --flutter
+          if (!(Test-Path ".\flutter\build\windows\x64\runner\Release\${{ 'rustdesk.exe' }}")) {
+            Write-Error "Build non trovata: rustdesk.exe assente nella cartella Release"
+            exit 1
+          }
+          mv .\flutter\build\windows\x64\runner\Release .\green4you
+
+      - name: Upload build folder
+        uses: actions/upload-artifact@v4
+        with:
+          name: green4you-assist-windows-x64
+          path: green4you
+
+      - name: Build NSIS installer
+        run: |
+          # NSIS è preinstallato sui runner windows; in fallback installalo.
+          $makensis = "C:\Program Files (x86)\NSIS\makensis.exe"
+          if (!(Test-Path $makensis)) { choco install nsis -y --no-progress }
+          & "$makensis" /DSRC_DIR="$PWD\green4you" /DVERSION="${{ env.APP_VERSION }}" res\nsis\green4you-assist.nsi
+          $setup = Get-ChildItem res\nsis\Green4You-Assist-*-Setup.exe | Select-Object -First 1
+          if (!$setup) { Write-Error "Installer NSIS non generato"; exit 1 }
+          Write-Host "Installer: $($setup.FullName) ($([math]::Round($setup.Length/1MB,1)) MB)"
+
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: green4you-assist-installer
+          path: res/nsis/Green4You-Assist-*-Setup.exe

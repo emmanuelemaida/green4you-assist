@@ -17,6 +17,10 @@ class Green4YouStore {
   // Ruolo dell'utente associato al device (da utente_kairos.is_admin, v4131).
   // Determina se la home mostra anche la sezione "Coda assistenza" (admin).
   static const String _kIsAdmin = 'g4y_is_admin';
+  // Flag developer (utente_kairos.is_developer, v4131). Oggi NON cambia UI né
+  // permessi (decisione Emmanuele, risposta #004): lo conserviamo per sbloccare
+  // strumenti diagnostici/feature dev in futuro senza tornare a chiedere al server.
+  static const String _kIsDeveloper = 'g4y_is_developer';
 
   /// device_token presente => dispositivo registrato (schermata B vs A).
   static Future<String?> deviceToken() => _storage.read(key: _kDeviceToken);
@@ -33,11 +37,17 @@ class Green4YouStore {
   static Future<bool> isAdmin() async =>
       (await _storage.read(key: _kIsAdmin)) == 'true';
 
+  /// true se l'utente è un developer (vedi nota su _kIsDeveloper). Oggi non
+  /// usato dalla UI; esposto per usi futuri.
+  static Future<bool> isDeveloper() async =>
+      (await _storage.read(key: _kIsDeveloper)) == 'true';
+
   static Future<void> saveCredentials({
     required String deviceToken,
     String? password,
     String? userName,
     bool? isAdmin,
+    bool? isDeveloper,
   }) async {
     await _storage.write(key: _kDeviceToken, value: deviceToken);
     if (password != null && password.isNotEmpty) {
@@ -49,6 +59,10 @@ class Green4YouStore {
     if (isAdmin != null) {
       await _storage.write(key: _kIsAdmin, value: isAdmin ? 'true' : 'false');
     }
+    if (isDeveloper != null) {
+      await _storage.write(
+          key: _kIsDeveloper, value: isDeveloper ? 'true' : 'false');
+    }
   }
 
   static Future<String?> password() => _storage.read(key: _kPassword);
@@ -59,5 +73,6 @@ class Green4YouStore {
     await _storage.delete(key: _kPassword);
     await _storage.delete(key: _kUserName);
     await _storage.delete(key: _kIsAdmin);
+    await _storage.delete(key: _kIsDeveloper);
   }
 }

@@ -731,12 +731,16 @@ class _Green4YouHomePageState extends State<Green4YouHomePage> {
                 utente is Map ? utente['nome_da_mostrare'] as String? : null;
             final isAdmin =
                 utente is Map ? utente['is_admin'] == true : false;
+            // is_developer salvato ma non usato in UI oggi (risposta #004).
+            final isDeveloper =
+                utente is Map ? utente['is_developer'] == true : false;
             // Rotazione token (device già registrato): sovrascrive il vecchio.
             await Green4YouStore.saveCredentials(
               deviceToken: creds['device_token'] as String,
               password: creds['password_permanente_cliente'] as String?,
               userName: name,
               isAdmin: isAdmin,
+              isDeveloper: isDeveloper,
             );
             if (!mounted) return;
             setState(() {

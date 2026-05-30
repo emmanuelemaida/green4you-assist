@@ -31,10 +31,12 @@ RequestExecutionLevel user                    ; per-utente: nessun prompt UAC
 ShowInstDetails show
 ShowUnInstDetails show
 
-; Icona installer/uninstaller: file dedicato accanto a questo script
-; (${__FILEDIR__} = cartella del .nsi), generato da generate_app_icon.ps1.
-!define MUI_ICON   "${__FILEDIR__}\green4you.ico"
-!define MUI_UNICON "${__FILEDIR__}\green4you.ico"
+; Icona installer/uninstaller: file dedicato accanto a questo script (generato
+; da generate_app_icon.ps1). I path MUI_ICON sono relativi alla cartella del
+; .nsi, quindi basta il nome file (NON anteporre ${__FILEDIR__}: NSIS lo
+; risolve già da qui, raddoppierebbe in res\nsis\res\nsis\).
+!define MUI_ICON   "green4you.ico"
+!define MUI_UNICON "green4you.ico"
 
 !include "MUI2.nsh"
 

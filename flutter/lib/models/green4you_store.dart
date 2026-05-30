@@ -4,7 +4,12 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 /// Keychain su macOS, DPAPI/Credential Manager su Windows (spec §7.4).
 /// Mai plaintext, mai SharedPreferences/localStorage.
 class Green4YouStore {
-  static const FlutterSecureStorage _storage = FlutterSecureStorage();
+  // useDataProtectionKeyChain:false → usa il keychain legacy (login). Su app
+  // NON sandboxed funziona senza l'entitlement keychain-access-groups, che la
+  // firma ad-hoc non ha: evita errSecMissingEntitlement (-34018).
+  static const FlutterSecureStorage _storage = FlutterSecureStorage(
+    mOptions: MacOsOptions(useDataProtectionKeyChain: false),
+  );
 
   static const String _kDeviceToken = 'g4y_device_token';
   static const String _kPassword = 'g4y_password_permanente';

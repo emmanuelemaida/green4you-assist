@@ -1012,7 +1012,9 @@ pub fn is_rustdesk() -> bool {
 
 #[inline]
 pub fn get_uri_prefix() -> String {
-    format!("{}://", get_app_name().to_lowercase())
+    // APP_NAME "Green4You Assist" contiene uno spazio: va rimosso per ottenere
+    // uno scheme valido ("green4youassist://") allineato a CFBundleURLSchemes nel Info.plist.
+    format!("{}://", get_app_name().to_lowercase().replace(' ', ""))
 }
 
 #[cfg(target_os = "macos")]

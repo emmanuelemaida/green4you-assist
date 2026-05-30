@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:flutter_hbb/common.dart' show connect;
 import 'package:flutter_hbb/models/platform_model.dart';
 import 'package:flutter_hbb/models/green4you_api.dart';
 import 'package:flutter_hbb/models/green4you_store.dart';
@@ -80,6 +81,12 @@ class _Green4YouHomePageState extends State<Green4YouHomePage> {
   int _regSecondsLeft = 600; // countdown conferma registrazione (dal 202)
   bool _errorVisible = false; // evita dialog d'errore impilati
 
+  // --- Lato admin (UI adattiva per ruolo, v4131) ---
+  bool _isAdmin = false; // utente_kairos.is_admin del device registrato
+  List<Map<String, dynamic>> _queue = []; // richieste in attesa da accettare
+  Timer? _queueTimer; // polling coda assistenza (5s)
+  int? _assistingId; // richiesta_id per cui si sta avviando la sessione
+
   static const String _appVersion = '1.0.0';
 
   @override
@@ -92,20 +99,25 @@ class _Green4YouHomePageState extends State<Green4YouHomePage> {
   void dispose() {
     _pollTimer?.cancel();
     _tick?.cancel();
+    _queueTimer?.cancel();
     super.dispose();
   }
 
   /// Stato iniziale: B se registrato (device_token in Keychain), altrimenti A.
+  /// Se l'utente è admin, avvia anche il polling della coda assistenza.
   Future<void> _init() async {
     final peerId = await bind.mainGetMyId();
     final registered = await Green4YouStore.isRegistered();
     final name = await Green4YouStore.userName();
+    final isAdmin = await Green4YouStore.isAdmin();
     if (!mounted) return;
     setState(() {
       _peerId = peerId;
       _userName = name ?? '';
+      _isAdmin = isAdmin;
       _state = registered ? ApplianceState.idle : ApplianceState.unregistered;
     });
+    if (registered && isAdmin) _startQueuePolling();
   }
 
   String get _hostname {
@@ -164,7 +176,8 @@ class _Green4YouHomePageState extends State<Green4YouHomePage> {
       case ApplianceState.unregistered:
         return _screenUnregistered(context);
       case ApplianceState.idle:
-        return _screenIdle(context);
+        // Admin: home a due sezioni (coda assistenza + richiedi assistenza).
+        return _isAdmin ? _screenAdminHome(context) : _screenIdle(context);
       case ApplianceState.requesting:
         return _screenRequesting(context);
       case ApplianceState.sessionActive:
@@ -342,6 +355,171 @@ class _Green4YouHomePageState extends State<Green4YouHomePage> {
           onPressed: _onOpenSettings,
         ),
       ],
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // (B-admin) Home admin: coda assistenza + richiedi assistenza
+  // ---------------------------------------------------------------------------
+  Widget _screenAdminHome(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 460),
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(24, 32, 24, 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _logoHeader(context),
+              const SizedBox(height: 18),
+              Text(_userName.isEmpty ? 'Ciao 👋' : 'Ciao $_userName 👋',
+                  style: Theme.of(context)
+                      .textTheme
+                      .titleMedium
+                      ?.copyWith(fontWeight: FontWeight.w500)),
+              const SizedBox(height: 24),
+              // --- Sezione coda assistenza ---
+              Row(
+                children: [
+                  const Icon(Icons.support_agent, size: 20, color: kGreen4You),
+                  const SizedBox(width: 8),
+                  Text('Coda assistenza',
+                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                          fontWeight: FontWeight.w600,
+                          color: isDark ? null : kGreen4YouDark)),
+                  const Spacer(),
+                  if (_queue.isNotEmpty)
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: kGreen4You,
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Text('${_queue.length}',
+                          style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600)),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              if (_queue.isEmpty)
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 18),
+                  child: Text('Nessuna richiesta in attesa.',
+                      style: Theme.of(context)
+                          .textTheme
+                          .bodyMedium
+                          ?.copyWith(color: Colors.grey)),
+                )
+              else
+                ..._queue.map((r) => _queueCard(context, r)),
+              const SizedBox(height: 20),
+              const Divider(height: 1),
+              const SizedBox(height: 20),
+              // --- Sezione richiedi assistenza (anche l'admin può chiedere) ---
+              Text('Hai bisogno di assistenza tu?',
+                  style: Theme.of(context).textTheme.bodyMedium),
+              const SizedBox(height: 14),
+              _primaryButton('Richiedi assistenza', _onRequestAssistance),
+              const SizedBox(height: 12),
+              TextButton.icon(
+                icon: const Icon(Icons.settings, size: 16),
+                label: const Text('Impostazioni'),
+                style: TextButton.styleFrom(foregroundColor: Colors.grey),
+                onPressed: _onOpenSettings,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Card di una richiesta in coda con i dati del collaboratore e il bottone
+  /// "Assisti" (disabilitato/spinner mentre si avvia un'altra sessione).
+  Widget _queueCard(BuildContext context, Map<String, dynamic> r) {
+    final id = r['richiesta_id'] as int?;
+    final nome = (r['collaboratore_nome'] as String?)?.trim();
+    final hostname = (r['hostname'] as String?)?.trim();
+    final so = (r['sistema_operativo'] as String?)?.trim();
+    final nota = (r['nota_collaboratore'] as String?)?.trim();
+    final attesa = r['secondi_attesa'];
+    final attesaStr = (attesa is int && attesa > 0)
+        ? (attesa < 60 ? '${attesa}s fa' : '${(attesa / 60).floor()} min fa')
+        : null;
+    final thisBusy = _assistingId == id;
+    final otherBusy = _assistingId != null && !thisBusy;
+    return Card(
+      margin: const EdgeInsets.only(bottom: 10),
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(10),
+        side: BorderSide(color: Colors.grey.withOpacity(0.3)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(14, 12, 12, 12),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(nome?.isNotEmpty == true ? nome! : 'Collaboratore',
+                      style: const TextStyle(fontWeight: FontWeight.w600)),
+                  const SizedBox(height: 2),
+                  Text(
+                    [
+                      if (hostname?.isNotEmpty == true) hostname,
+                      if (so?.isNotEmpty == true) so,
+                      if (attesaStr != null) attesaStr,
+                    ].join(' · '),
+                    style: Theme.of(context)
+                        .textTheme
+                        .bodySmall
+                        ?.copyWith(color: Colors.grey),
+                  ),
+                  if (nota?.isNotEmpty == true) ...[
+                    const SizedBox(height: 6),
+                    Text(nota!,
+                        style: Theme.of(context).textTheme.bodySmall),
+                  ],
+                ],
+              ),
+            ),
+            const SizedBox(width: 10),
+            SizedBox(
+              height: 36,
+              child: ElevatedButton.icon(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: kGreen4You,
+                  foregroundColor: Colors.white,
+                  elevation: 0,
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8)),
+                ),
+                icon: thisBusy
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            valueColor:
+                                AlwaysStoppedAnimation<Color>(Colors.white)),
+                      )
+                    : const Icon(Icons.login, size: 18),
+                label: const Text('Assisti'),
+                onPressed:
+                    (id == null || thisBusy || otherBusy) ? null : () => _onAssist(id),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -542,18 +720,23 @@ class _Green4YouHomePageState extends State<Green4YouHomePage> {
             final utente = creds['utente_kairos'];
             final name =
                 utente is Map ? utente['nome_da_mostrare'] as String? : null;
+            final isAdmin =
+                utente is Map ? utente['is_admin'] == true : false;
             // Rotazione token (device già registrato): sovrascrive il vecchio.
             await Green4YouStore.saveCredentials(
               deviceToken: creds['device_token'] as String,
               password: creds['password_permanente_cliente'] as String?,
               userName: name,
+              isAdmin: isAdmin,
             );
             if (!mounted) return;
             setState(() {
               _userName = name ?? '';
+              _isAdmin = isAdmin;
               _registering = false;
               _state = ApplianceState.idle;
             });
+            if (isAdmin) _startQueuePolling();
           } catch (e) {
             setState(() => _registering = false);
             _showError('Salvataggio credenziali (Keychain): $e');
@@ -637,6 +820,75 @@ class _Green4YouHomePageState extends State<Green4YouHomePage> {
     });
   }
 
+  // ---------------------------------------------------------------------------
+  // Lato admin: coda assistenza (polling ogni 5s) e accettazione richieste
+  // ---------------------------------------------------------------------------
+
+  /// Polling della coda richieste in attesa (§6.10). Aggiorna _queue; errori di
+  /// rete silenziosi (riprova al tick successivo), come gli altri polling.
+  void _startQueuePolling() {
+    _queueTimer?.cancel();
+    _refreshQueue(); // primo fetch immediato
+    _queueTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+      _refreshQueue();
+    });
+  }
+
+  Future<void> _refreshQueue() async {
+    final token = await Green4YouStore.deviceToken();
+    if (token == null || token.isEmpty) return;
+    try {
+      final list = await Green4YouApi.richiesteInAttesa(token);
+      if (!mounted) return;
+      setState(() => _queue = list);
+    } catch (_) {
+      // rete: riprova al prossimo tick
+    }
+  }
+
+  /// L'admin accetta una richiesta: avvia-sessione → preleva-credenziali →
+  /// connessione RustDesk verso il target. Chiude il loop E2E.
+  Future<void> _onAssist(int richiestaId) async {
+    if (_assistingId != null) return;
+    setState(() => _assistingId = richiestaId);
+    try {
+      final token = await Green4YouStore.deviceToken();
+      if (token == null || token.isEmpty) {
+        _showError('Device non registrato: impossibile accettare.');
+        return;
+      }
+      final sessione = await Green4YouApi.avviaSessione(
+        deviceToken: token,
+        richiestaId: richiestaId,
+      );
+      final sessionToken = sessione['session_token'] as String?;
+      if (sessionToken == null || sessionToken.isEmpty) {
+        _showError('Risposta inattesa da avvia-sessione.');
+        return;
+      }
+      final creds = await Green4YouApi.prelevaCredenzialiSessione(
+        deviceToken: token,
+        sessionToken: sessionToken,
+      );
+      final targetId = creds['target_peer_id_rustdesk'] as String?;
+      final targetPwd = creds['password_target'] as String?;
+      if (targetId == null || targetId.isEmpty) {
+        _showError('Credenziali del target mancanti nella risposta.');
+        return;
+      }
+      if (!mounted) return;
+      // Avvia la sessione RustDesk in uscita verso il collaboratore. La sessione
+      // si apre in una finestra dedicata; la coda admin resta attiva.
+      connect(context, targetId,
+          password: targetPwd, isSharedPassword: targetPwd != null);
+      _refreshQueue();
+    } catch (e) {
+      _showError('Impossibile avviare l\'assistenza.\n\n$e');
+    } finally {
+      if (mounted) setState(() => _assistingId = null);
+    }
+  }
+
   void _onOpenSettings() {
     showDialog(
       context: context,
@@ -648,9 +900,12 @@ class _Green4YouHomePageState extends State<Green4YouHomePage> {
             onPressed: () async {
               Navigator.of(context).pop();
               await Green4YouStore.clear();
+              _queueTimer?.cancel();
               if (!mounted) return;
               setState(() {
                 _userName = '';
+                _isAdmin = false;
+                _queue = [];
                 _state = ApplianceState.unregistered;
               });
             },

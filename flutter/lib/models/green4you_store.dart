@@ -14,6 +14,9 @@ class Green4YouStore {
   static const String _kDeviceToken = 'g4y_device_token';
   static const String _kPassword = 'g4y_password_permanente';
   static const String _kUserName = 'g4y_nome_da_mostrare';
+  // Ruolo dell'utente associato al device (da utente_kairos.is_admin, v4131).
+  // Determina se la home mostra anche la sezione "Coda assistenza" (admin).
+  static const String _kIsAdmin = 'g4y_is_admin';
 
   /// device_token presente => dispositivo registrato (schermata B vs A).
   static Future<String?> deviceToken() => _storage.read(key: _kDeviceToken);
@@ -24,10 +27,17 @@ class Green4YouStore {
   /// Nome da mostrare ("Ciao [nome]"), da utente_kairos.nome_da_mostrare.
   static Future<String?> userName() => _storage.read(key: _kUserName);
 
+  /// true se l'utente associato a questo device è un admin Green4You: la home
+  /// mostra allora anche la sezione "Coda assistenza". Default false (anche per
+  /// device registrati prima di v4131, finché non rigenerano le credenziali).
+  static Future<bool> isAdmin() async =>
+      (await _storage.read(key: _kIsAdmin)) == 'true';
+
   static Future<void> saveCredentials({
     required String deviceToken,
     String? password,
     String? userName,
+    bool? isAdmin,
   }) async {
     await _storage.write(key: _kDeviceToken, value: deviceToken);
     if (password != null && password.isNotEmpty) {
@@ -35,6 +45,9 @@ class Green4YouStore {
     }
     if (userName != null && userName.isNotEmpty) {
       await _storage.write(key: _kUserName, value: userName);
+    }
+    if (isAdmin != null) {
+      await _storage.write(key: _kIsAdmin, value: isAdmin ? 'true' : 'false');
     }
   }
 
@@ -45,5 +58,6 @@ class Green4YouStore {
     await _storage.delete(key: _kDeviceToken);
     await _storage.delete(key: _kPassword);
     await _storage.delete(key: _kUserName);
+    await _storage.delete(key: _kIsAdmin);
   }
 }

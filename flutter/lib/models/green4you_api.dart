@@ -145,6 +145,44 @@ class Green4YouApi {
   }
 
   // ---------------------------------------------------------------------------
+  // Lato admin — coda assistenza (§6.10)
+  // ---------------------------------------------------------------------------
+
+  /// Coda delle richieste in attesa che l'admin può accettare. Ritorna la lista
+  /// (eventualmente vuota) dal campo `richieste`. Ogni elemento contiene:
+  /// {richiesta_id, collaboratore_nome, hostname, sistema_operativo,
+  ///  nota_collaboratore, ts_richiesta, secondi_attesa}.
+  static Future<List<Map<String, dynamic>>> richiesteInAttesa(
+      String deviceToken) async {
+    final r = await http.get(
+      _u('admin/richieste-in-attesa.php'),
+      headers: _json(deviceToken),
+    );
+    _checkOk(r, 'richieste-in-attesa');
+    final j = jsonDecode(r.body);
+    final list = (j is Map ? j['richieste'] : j) as List<dynamic>?;
+    return (list ?? const [])
+        .whereType<Map>()
+        .map((e) => e.cast<String, dynamic>())
+        .toList();
+  }
+
+  /// L'admin avvia la sessione per una richiesta: il backend crea il binding e
+  /// ritorna {session_token, deep_link}. Il session_token va poi scambiato con
+  /// prelevaCredenzialiSessione per ottenere le credenziali del target.
+  static Future<Map<String, dynamic>> avviaSessione({
+    required String deviceToken,
+    required int richiestaId,
+  }) async {
+    final r = await http.get(
+      _u('admin/avvia-sessione.php?richiesta_id=$richiestaId&format=json'),
+      headers: _json(deviceToken),
+    );
+    _checkOk(r, 'avvia-sessione');
+    return jsonDecode(r.body) as Map<String, dynamic>;
+  }
+
+  // ---------------------------------------------------------------------------
   // Lato admin — deep-link connect (§6.10.1)
   // ---------------------------------------------------------------------------
 

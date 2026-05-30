@@ -411,12 +411,22 @@ def build_flutter_dmg(version, features):
         "cp target/release/liblibrustdesk.dylib target/release/librustdesk.dylib")
     os.chdir('flutter')
     system2('flutter build macos --release')
-    system2('cp -rf ../target/release/service "./build/macos/Build/Products/Release/Green4You Assist.app/Contents/MacOS/"')
-    '''
-    system2(
-        "create-dmg --volname \"Green4You Assist Installer\" --window-pos 200 120 --window-size 800 400 --icon-size 100 --app-drop-link 600 185 --icon \"Green4You Assist.app\" 200 190 --hide-extension \"Green4You Assist.app\" \"Green4You Assist.dmg\" \"./build/macos/Build/Products/Release/Green4You Assist.app\"")
+    app_path = './build/macos/Build/Products/Release/Green4You Assist.app'
+    system2('cp -rf ../target/release/service "%s/Contents/MacOS/"' % app_path)
+    # Re-firma ad-hoc dell'intero bundle: copiare il binario service rompe il sigillo
+    # della firma di xcodebuild, e FlutterMacOS.framework ha un Team ID diverso dal main
+    # binary non firmato; senza re-firma --deep la library validation di macOS impedisce
+    # il caricamento del framework e l'app crasha al lancio.
+    system2('codesign --force --deep --sign - "%s"' % app_path)
+    # DMG di distribuzione via hdiutil (headless: niente Finder/AppleScript di create-dmg,
+    # che richiede permessi Automation e una sessione GUI interattiva).
+    system2('/bin/rm -f "Green4You Assist.dmg" && /bin/rm -rf /tmp/g4y-dmg-stage')
+    system2('mkdir -p /tmp/g4y-dmg-stage')
+    system2('cp -R "%s" /tmp/g4y-dmg-stage/' % app_path)
+    system2('ln -s /Applications /tmp/g4y-dmg-stage/Applications')
+    system2('hdiutil create -volname "Green4You Assist" -srcfolder /tmp/g4y-dmg-stage -ov -format UDZO "Green4You Assist.dmg"')
+    system2('/bin/rm -rf /tmp/g4y-dmg-stage')
     os.rename("Green4You Assist.dmg", "../Green4You Assist.dmg")
-    '''
     os.chdir("..")
 
 

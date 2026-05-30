@@ -443,16 +443,21 @@ class _Green4YouHomePageState extends State<Green4YouHomePage> {
   /// "Assisti" (disabilitato/spinner mentre si avvia un'altra sessione).
   Widget _queueCard(BuildContext context, Map<String, dynamic> r) {
     final id = r['richiesta_id'] as int?;
-    // Contratto E2E: nome in utente.nome_da_mostrare; tolleriamo anche un
-    // eventuale collaboratore_nome piatto per robustezza.
+    // Contratto v4132: campi piatti (collaboratore_nome, nota_collaboratore).
+    // Fallback alle vecchie forme (utente.nome_da_mostrare, note_collaboratore)
+    // per robustezza verso payload più datati.
     final utente = r['utente'];
-    final nome = ((utente is Map ? utente['nome_da_mostrare'] : null) ??
-            r['collaboratore_nome']) as String?;
+    final nome = (r['collaboratore_nome'] ??
+            (utente is Map ? utente['nome_da_mostrare'] : null)) as String?;
     final hostname = (r['hostname'] as String?)?.trim();
     final so = (r['sistema_operativo'] as String?)?.trim();
     final nota =
-        ((r['note_collaboratore'] ?? r['nota_collaboratore']) as String?)
+        ((r['nota_collaboratore'] ?? r['note_collaboratore']) as String?)
             ?.trim();
+    final attesa = r['secondi_attesa'];
+    final attesaStr = (attesa is int && attesa > 0)
+        ? (attesa < 60 ? '${attesa}s fa' : '${(attesa / 60).floor()} min fa')
+        : null;
     final thisBusy = _assistingId == id;
     final otherBusy = _assistingId != null && !thisBusy;
     return Card(
@@ -474,11 +479,14 @@ class _Green4YouHomePageState extends State<Green4YouHomePage> {
                   Text(nome?.trim().isNotEmpty == true ? nome!.trim() : 'Collaboratore',
                       style: const TextStyle(fontWeight: FontWeight.w600)),
                   const SizedBox(height: 2),
-                  if (hostname?.isNotEmpty == true || so?.isNotEmpty == true)
+                  if (hostname?.isNotEmpty == true ||
+                      so?.isNotEmpty == true ||
+                      attesaStr != null)
                     Text(
                       [
                         if (hostname?.isNotEmpty == true) hostname,
                         if (so?.isNotEmpty == true) so,
+                        if (attesaStr != null) attesaStr,
                       ].join(' · '),
                       style: Theme.of(context)
                           .textTheme

@@ -1,6 +1,15 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 
+/// Esito del polling di recupera-credenziali (HTTP 200/202/410).
+class RecuperaResult {
+  /// 'confirmed' (creds pronte) | 'pending' (in attesa conferma) | 'expired'.
+  final String stato;
+  final Map<String, dynamic>? creds;
+  final int? secondiAllaScadenza;
+  const RecuperaResult(this.stato, {this.creds, this.secondiAllaScadenza});
+}
+
 /// Client HTTP per le API v2 del modulo Kairos "assistenza_remota" (Fase 4).
 /// Contratti dal playbook E2E-SMOKE-TEST-FASE-4.md.
 class Green4YouApi {
@@ -38,15 +47,25 @@ class Green4YouApi {
     return (jsonDecode(r.body) as Map<String, dynamic>)['nonce'] as String;
   }
 
-  /// 1c. Dopo che l'utente ha confermato nel browser, l'app preleva (UNA volta)
-  /// device_token + password permanente. Ritorna null se il nonce non è ancora
-  /// confermato / già consumato.
-  static Future<Map<String, dynamic>?> recuperaCredenziali(String nonce) async {
+  /// 1c. Polling post-conferma. Distingue i 3 stati HTTP del backend v4128:
+  /// 200 = confermato (creds), 202 = pending (in attesa conferma browser),
+  /// 410 = scaduto/consumato/inesistente (molla).
+  static Future<RecuperaResult> recuperaCredenziali(String nonce) async {
     final r = await http
         .get(_u('registra-dispositivo/recupera-credenziali.php?nonce=$nonce'));
-    if (r.statusCode != 200) return null;
-    final j = jsonDecode(r.body);
-    return j is Map<String, dynamic> ? j : null;
+    if (r.statusCode == 200) {
+      final j = jsonDecode(r.body);
+      return RecuperaResult('confirmed',
+          creds: j is Map<String, dynamic> ? j : null);
+    } else if (r.statusCode == 202) {
+      int? sec;
+      try {
+        sec = (jsonDecode(r.body) as Map<String, dynamic>)[
+            'secondi_alla_scadenza_nonce'] as int?;
+      } catch (_) {}
+      return RecuperaResult('pending', secondiAllaScadenza: sec);
+    }
+    return const RecuperaResult('expired'); // 410 o altro
   }
 
   // ---------------------------------------------------------------------------

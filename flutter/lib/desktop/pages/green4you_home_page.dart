@@ -75,6 +75,8 @@ class _Green4YouHomePageState extends State<Green4YouHomePage> {
   int _timeoutSeconds = 900; // da ts_scadenza/timeout_secondi della risposta
   Timer? _pollTimer; // polling stato-richiesta / recupera-credenziali
   Timer? _tick; // refresh del countdown in schermata C
+  bool _registering = false; // polling registrazione in corso (schermata A)
+  int _regSecondsLeft = 600; // countdown conferma registrazione (dal 202)
 
   static const String _appVersion = '1.0.0';
 
@@ -266,13 +268,39 @@ class _Green4YouHomePageState extends State<Green4YouHomePage> {
       children: [
         _logoHeader(context),
         const SizedBox(height: 28),
-        Text('Questo PC non è ancora associato a un account.',
+        if (_registering) ...[
+          const SizedBox(
+            width: 26,
+            height: 26,
+            child: CircularProgressIndicator(
+                strokeWidth: 3,
+                valueColor: AlwaysStoppedAnimation<Color>(kGreen4You)),
+          ),
+          const SizedBox(height: 18),
+          Text('In attesa di conferma nel browser…',
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.bodyMedium),
+          const SizedBox(height: 6),
+          Text(
+            'Accedi a Kairos e conferma la registrazione.\nScade tra ${(_regSecondsLeft / 60).ceil()} min.',
             textAlign: TextAlign.center,
-            style: Theme.of(context).textTheme.bodyMedium),
-        const SizedBox(height: 28),
-        _primaryButton('Richiedi assistenza', _onRequestAssistance),
-        const SizedBox(height: 12),
-        _outlineButton('Registra questo PC', _onRegisterDevice),
+            style: Theme.of(context)
+                .textTheme
+                .bodySmall
+                ?.copyWith(color: Colors.grey),
+          ),
+          const SizedBox(height: 18),
+          _outlineButton('Annulla', _onCancelRegistration,
+              color: Colors.redAccent),
+        ] else ...[
+          Text('Questo PC non è ancora associato a un account.',
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.bodyMedium),
+          const SizedBox(height: 28),
+          _primaryButton('Richiedi assistenza', _onRequestAssistance),
+          const SizedBox(height: 12),
+          _outlineButton('Registra questo PC', _onRegisterDevice),
+        ],
         const SizedBox(height: 24),
         Text(
           'Versione 1.0.0 — sorgenti: github.com/emmanuelemaida/green4you-assist',
@@ -454,9 +482,15 @@ class _Green4YouHomePageState extends State<Green4YouHomePage> {
   /// Registra questo PC (§4.1): genera nonce, apre il browser sulla pagina di
   /// conferma Kairos, poi fa polling di recupera-credenziali finché l'utente
   /// conferma; salva device_token+password+nome in Keychain.
+  /// Registra questo PC: genera nonce, apre il browser, poi POLLING PRIMARIO di
+  /// recupera-credenziali (il deep-link è solo un acceleratore opzionale, non
+  /// affidabile per utenti non tecnici). Retry sempre consentito.
   Future<void> _onRegisterDevice() async {
-    if (_busy) return;
-    setState(() => _busy = true);
+    _pollTimer?.cancel();
+    setState(() {
+      _registering = true;
+      _regSecondsLeft = 600;
+    });
     try {
       final nonce = await Green4YouApi.generaNonce(
         peerId: _peerId ?? '',
@@ -470,43 +504,66 @@ class _Green4YouHomePageState extends State<Green4YouHomePage> {
       _pollRegistration(nonce);
     } catch (_) {
       _showError('Registrazione non riuscita. Riprova.');
-      if (mounted) setState(() => _busy = false);
+      if (mounted) setState(() => _registering = false);
     }
+  }
+
+  void _onCancelRegistration() {
+    _pollTimer?.cancel();
+    setState(() => _registering = false);
   }
 
   void _pollRegistration(String nonce) {
     _pollTimer?.cancel();
-    int attempts = 0;
     _pollTimer = Timer.periodic(const Duration(seconds: 3), (t) async {
-      attempts++;
-      if (attempts > 100) {
-        // il nonce scade in ~5 min: smetti di attendere
-        t.cancel();
-        if (mounted) setState(() => _busy = false);
-        return;
-      }
-      Map<String, dynamic>? creds;
+      RecuperaResult res;
       try {
-        creds = await Green4YouApi.recuperaCredenziali(nonce);
+        res = await Green4YouApi.recuperaCredenziali(nonce);
       } catch (_) {
-        return;
+        return; // rete: riprova al prossimo tick
       }
-      if (creds != null && creds['device_token'] != null) {
-        t.cancel();
-        final utente = creds['utente_kairos'];
-        final name =
-            utente is Map ? utente['nome_da_mostrare'] as String? : null;
-        await Green4YouStore.saveCredentials(
-          deviceToken: creds['device_token'] as String,
-          password: creds['password_permanente_cliente'] as String?,
-          userName: name,
-        );
-        if (!mounted) return;
-        setState(() {
-          _userName = name ?? '';
-          _state = ApplianceState.idle;
-          _busy = false;
-        });
+      if (!mounted) return;
+      switch (res.stato) {
+        case 'pending':
+          setState(() =>
+              _regSecondsLeft = res.secondiAllaScadenza ?? _regSecondsLeft);
+          break;
+        case 'confirmed':
+          t.cancel();
+          final creds = res.creds;
+          if (creds == null || creds['device_token'] == null) {
+            setState(() => _registering = false);
+            _showError('Risposta inattesa dal server.');
+            return;
+          }
+          try {
+            final utente = creds['utente_kairos'];
+            final name =
+                utente is Map ? utente['nome_da_mostrare'] as String? : null;
+            // Rotazione token (device già registrato): sovrascrive il vecchio.
+            await Green4YouStore.saveCredentials(
+              deviceToken: creds['device_token'] as String,
+              password: creds['password_permanente_cliente'] as String?,
+              userName: name,
+            );
+            if (!mounted) return;
+            setState(() {
+              _userName = name ?? '';
+              _registering = false;
+              _state = ApplianceState.idle;
+            });
+          } catch (e) {
+            setState(() => _registering = false);
+            _showError('Salvataggio credenziali (Keychain): $e');
+          }
+          break;
+        case 'expired':
+        default:
+          t.cancel();
+          setState(() => _registering = false);
+          _showError(
+              'Registrazione non completata o scaduta. Riprova; se persiste, contatta l\'amministratore.');
+          break;
       }
     });
   }

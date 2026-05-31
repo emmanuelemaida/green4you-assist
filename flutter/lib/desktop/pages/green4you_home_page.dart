@@ -317,7 +317,7 @@ class _Green4YouHomePageState extends State<Green4YouHomePage> {
         ],
         const SizedBox(height: 24),
         Text(
-          'Versione 1.0.0 — sorgenti: github.com/emmanuelemaida/green4you-assist',
+          'Versione 1.0.0',
           style: Theme.of(context)
               .textTheme
               .bodySmall

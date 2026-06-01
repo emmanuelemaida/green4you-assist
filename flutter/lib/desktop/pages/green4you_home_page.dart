@@ -120,6 +120,23 @@ class _Green4YouHomePageState extends State<Green4YouHomePage> {
     if (registered && isAdmin) _startQueuePolling();
   }
 
+  /// Restituisce l'ID RustDesk (9-10 cifre) generato dal core. Dopo un'installazione
+  /// fresca il core potrebbe non averlo ancora caricato all'avvio, quindi la lettura
+  /// in _init() torna stringa vuota e _peerId resterebbe vuoto per tutta la sessione,
+  /// facendo fallire genera-nonce / richiesta-anonima con HTTP 400. Qui rileggiamo
+  /// con qualche retry e aggiorniamo lo stato appena l'ID è disponibile.
+  Future<String> _ensurePeerId() async {
+    var id = _peerId ?? '';
+    for (var i = 0; id.isEmpty && i < 12; i++) {
+      id = await bind.mainGetMyId();
+      if (id.isEmpty) await Future.delayed(const Duration(milliseconds: 400));
+    }
+    if (id.isNotEmpty && id != (_peerId ?? '') && mounted) {
+      setState(() => _peerId = id);
+    }
+    return id;
+  }
+
   String get _hostname {
     try {
       return Platform.localHostname;
@@ -642,8 +659,14 @@ class _Green4YouHomePageState extends State<Green4YouHomePage> {
         res = await Green4YouApi.richiediAssistenza(deviceToken: token);
         _wasAnonymous = false;
       } else {
+        final peerId = await _ensurePeerId();
+        if (peerId.isEmpty) {
+          _showError(
+              'ID dispositivo non ancora pronto.\n\nAttendi qualche secondo e riprova.');
+          return;
+        }
         res = await Green4YouApi.richiediAssistenzaAnonima(
-          peerId: _peerId ?? '',
+          peerId: peerId,
           hostname: _hostname,
           sistemaOperativo: _so,
           versioneApp: _appVersion,
@@ -681,8 +704,15 @@ class _Green4YouHomePageState extends State<Green4YouHomePage> {
       _regSecondsLeft = 600;
     });
     try {
+      final peerId = await _ensurePeerId();
+      if (peerId.isEmpty) {
+        if (mounted) setState(() => _registering = false);
+        _showError(
+            'ID dispositivo non ancora pronto.\n\nAttendi qualche secondo e riprova.');
+        return;
+      }
       final nonce = await Green4YouApi.generaNonce(
-        peerId: _peerId ?? '',
+        peerId: peerId,
         hostname: _hostname,
         sistemaOperativo: _so,
         versioneApp: _appVersion,

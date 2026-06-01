@@ -786,10 +786,19 @@ class _Green4YouHomePageState extends State<Green4YouHomePage> {
             // is_developer salvato ma non usato in UI oggi (risposta #004).
             final isDeveloper =
                 utente is Map ? utente['is_developer'] == true : false;
+            final password = creds['password_permanente_cliente'] as String?;
+            // Applica la password permanente al core RustDesk: è la STESSA che il
+            // backend restituisce all'admin (password_target) per collegarsi in
+            // modalità non presidiata. Senza, il core avrebbe una password diversa
+            // e la connessione dell'admin verrebbe rifiutata. Necessario sul device
+            // collaboratore (target); innocuo sul device admin.
+            if (password != null && password.isNotEmpty) {
+              await bind.mainSetPermanentPassword(password: password);
+            }
             // Rotazione token (device già registrato): sovrascrive il vecchio.
             await Green4YouStore.saveCredentials(
               deviceToken: creds['device_token'] as String,
-              password: creds['password_permanente_cliente'] as String?,
+              password: password,
               userName: name,
               isAdmin: isAdmin,
               isDeveloper: isDeveloper,

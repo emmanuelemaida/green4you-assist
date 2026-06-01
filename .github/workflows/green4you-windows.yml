@@ -135,8 +135,8 @@ jobs:
             exit 1
           }
           $rel = "flutter/build/windows/x64/runner/Release"
-          if (-not (Test-Path "$rel/rustdesk.exe")) {
-            Write-Error "Build non trovata: rustdesk.exe assente in $rel"
+          if (-not (Test-Path "$rel/Green4YouAssist.exe")) {
+            Write-Error "Build non trovata: Green4YouAssist.exe assente in $rel"
             exit 1
           }
           # Copy-Item (cmdlet) non eredita $LASTEXITCODE: chiudiamo con exit 0 esplicito.

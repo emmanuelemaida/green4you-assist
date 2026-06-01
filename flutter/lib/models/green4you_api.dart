@@ -1,5 +1,8 @@
 import 'dart:convert';
+import 'dart:io';
+import 'package:flutter/services.dart' show rootBundle;
 import 'package:http/http.dart' as http;
+import 'package:http/io_client.dart';
 
 /// Esito del polling di recupera-credenziali (HTTP 200/202/410).
 class RecuperaResult {
@@ -22,6 +25,35 @@ class Green4YouApi {
         'Content-Type': 'application/json',
         if (deviceToken != null) 'X-Device-Token': deviceToken,
       };
+
+  // Client HTTP con le root CA INCLUSE nell'app (assets/cacert.pem, bundle Mozilla).
+  // Su PC Windows "puliti" lo store di sistema può non avere la root ISRG Root X1
+  // (Let's Encrypt) e BoringSSL di Flutter non la scarica al volo (no AIA fetch):
+  // l'handshake TLS fallirebbe con "unable to get local issuer certificate". Con le
+  // root nel bundle la verifica funziona ovunque, a prescindere dallo store del PC.
+  static http.Client? _client;
+  static Future<http.Client> _httpClient() async {
+    final existing = _client;
+    if (existing != null) return existing;
+    http.Client made;
+    try {
+      final pem = await rootBundle.load('assets/cacert.pem');
+      final ctx = SecurityContext(withTrustedRoots: false)
+        ..setTrustedCertificatesBytes(pem.buffer.asUint8List());
+      made = IOClient(HttpClient(context: ctx));
+    } catch (_) {
+      made = http.Client(); // fallback: store del sistema operativo
+    }
+    return _client = made;
+  }
+
+  static Future<http.Response> _post(Uri u,
+          {Map<String, String>? headers, Object? body}) async =>
+      (await _httpClient()).post(u, headers: headers, body: body);
+
+  static Future<http.Response> _get(Uri u,
+          {Map<String, String>? headers}) async =>
+      (await _httpClient()).get(u, headers: headers);
 
   /// Lancia un errore descrittivo (status + body del server) se non è 2xx,
   /// così il messaggio mostrato all'utente è leggibile/copiabile per un admin.
@@ -63,7 +95,7 @@ class Green4YouApi {
     required String sistemaOperativo,
     required String versioneApp,
   }) async {
-    final r = await http.post(
+    final r = await _post(
       _u('registra-dispositivo/genera-nonce.php'),
       headers: _json(),
       body: jsonEncode({
@@ -81,8 +113,8 @@ class Green4YouApi {
   /// 200 = confermato (creds), 202 = pending (in attesa conferma browser),
   /// 410 = scaduto/consumato/inesistente (molla).
   static Future<RecuperaResult> recuperaCredenziali(String nonce) async {
-    final r = await http
-        .get(_u('registra-dispositivo/recupera-credenziali.php?nonce=$nonce'));
+    final r = await _get(
+        _u('registra-dispositivo/recupera-credenziali.php?nonce=$nonce'));
     if (r.statusCode == 200) {
       final j = jsonDecode(r.body);
       return RecuperaResult('confirmed',
@@ -107,7 +139,7 @@ class Green4YouApi {
     required String deviceToken,
     String? note,
   }) async {
-    final r = await http.post(
+    final r = await _post(
       _u('richiedi-assistenza.php'),
       headers: _json(deviceToken),
       body: jsonEncode({'note_collaboratore': note ?? ''}),
@@ -124,7 +156,7 @@ class Green4YouApi {
     required String versioneApp,
     String? note,
   }) async {
-    final r = await http.post(
+    final r = await _post(
       _u('richiedi-assistenza-anonima.php'),
       headers: _json(),
       body: jsonEncode({
@@ -145,14 +177,14 @@ class Green4YouApi {
   static Future<Map<String, dynamic>> statoRichiesta(
       String richiestaToken) async {
     final r =
-        await http.get(_u('stato-richiesta.php?richiesta_token=$richiestaToken'));
+        await _get(_u('stato-richiesta.php?richiesta_token=$richiestaToken'));
     _checkOk(r, 'stato-richiesta');
     return jsonDecode(r.body) as Map<String, dynamic>;
   }
 
   /// Annulla una richiesta in_attesa.
   static Future<void> annullaRichiesta(String richiestaToken) async {
-    await http.post(
+    await _post(
       _u('annulla-richiesta.php'),
       headers: _json(),
       body: jsonEncode({'richiesta_token': richiestaToken}),
@@ -170,7 +202,7 @@ class Green4YouApi {
   /// Auth: X-Device-Token di un device admin (403 se non admin).
   static Future<List<Map<String, dynamic>>> richiesteInAttesa(
       String deviceToken) async {
-    final r = await http.get(
+    final r = await _get(
       _u('admin/richieste-in-attesa.php'),
       headers: _json(deviceToken),
     );
@@ -190,7 +222,7 @@ class Green4YouApi {
     required String deviceToken,
     required int richiestaId,
   }) async {
-    final r = await http.get(
+    final r = await _get(
       _u('admin/avvia-sessione.php?richiesta_id=$richiestaId&format=json'),
       headers: _json(deviceToken),
     );
@@ -209,7 +241,7 @@ class Green4YouApi {
     required String deviceToken,
     required String sessionToken,
   }) async {
-    final r = await http.post(
+    final r = await _post(
       _u('admin/preleva-credenziali-sessione.php'),
       headers: _json(deviceToken),
       body: jsonEncode({'session_token': sessionToken}),

@@ -94,7 +94,7 @@ BEGIN
             VALUE "FileVersion", VERSION_AS_STRING "\0"
             VALUE "InternalName", "green4you_assist" "\0"
             VALUE "LegalCopyright", "Copyright © 2026 Green4You. All rights reserved." "\0"
-            VALUE "OriginalFilename", "Green4You Assist.exe" "\0"
+            VALUE "OriginalFilename", "Green4YouAssist.exe" "\0"
             VALUE "ProductName", "Green4You Assist" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END

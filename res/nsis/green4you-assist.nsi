@@ -18,7 +18,7 @@ SetCompressor /SOLID lzma
 !endif
 
 !define APP_NAME      "Green4You Assist"
-!define APP_EXE       "rustdesk.exe"          ; BINARY_NAME del fork (interno)
+!define APP_EXE       "Green4YouAssist.exe"    ; BINARY_NAME del runner (flutter/windows/CMakeLists.txt)
 !define APP_SCHEME    "green4youassist"       ; deve combaciare con get_uri_prefix()
 !define APP_PUBLISHER "Green4You"
 !define APP_REGKEY    "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APP_NAME}"

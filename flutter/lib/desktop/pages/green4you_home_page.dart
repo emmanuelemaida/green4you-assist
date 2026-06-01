@@ -79,6 +79,7 @@ class _Green4YouHomePageState extends State<Green4YouHomePage> {
   Timer? _tick; // refresh del countdown in schermata C
   bool _registering = false; // polling registrazione in corso (schermata A)
   int _regSecondsLeft = 600; // countdown conferma registrazione (dal 202)
+  String? _registrationUrl; // URL conferma col nonce, riapribile dopo il login Kairos
   bool _errorVisible = false; // evita dialog d'errore impilati
 
   // --- Lato admin (UI adattiva per ruolo, v4131) ---
@@ -313,7 +314,10 @@ class _Green4YouHomePageState extends State<Green4YouHomePage> {
               style: Theme.of(context).textTheme.bodyMedium),
           const SizedBox(height: 6),
           Text(
-            'Accedi a Kairos e conferma la registrazione.\nScade tra ${(_regSecondsLeft / 60).ceil()} min.',
+            'Per registrare questo PC devi essere connesso a Kairos.\n'
+            'Se il browser ti ha chiesto di accedere, fai login e poi premi '
+            '"Riapri la pagina di conferma".\n'
+            'Scade tra ${(_regSecondsLeft / 60).ceil()} min.',
             textAlign: TextAlign.center,
             style: Theme.of(context)
                 .textTheme
@@ -321,6 +325,9 @@ class _Green4YouHomePageState extends State<Green4YouHomePage> {
                 ?.copyWith(color: Colors.grey),
           ),
           const SizedBox(height: 18),
+          _primaryButton('Riapri la pagina di conferma', _reopenRegistration,
+              icon: Icons.open_in_browser),
+          const SizedBox(height: 10),
           _outlineButton('Annulla', _onCancelRegistration,
               color: Colors.redAccent),
         ] else ...[
@@ -719,11 +726,26 @@ class _Green4YouHomePageState extends State<Green4YouHomePage> {
       );
       final url =
           'https://crm.green4you.cloud/kairos/modules/assistenza_remota/registra-dispositivo.php?nonce=$nonce';
+      _registrationUrl = url;
       await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
       _pollRegistration(nonce);
     } catch (e) {
       _showError('Registrazione non riuscita.\n\n$e');
       if (mounted) setState(() => _registering = false);
+    }
+  }
+
+  /// Riapre nel browser la stessa pagina di conferma (stesso nonce). Utile quando
+  /// l'utente non era loggato su Kairos: il primo tentativo lo manda al login e lo
+  /// lascia sulla dashboard senza tornare alla conferma; rifatto il login, riaprire
+  /// questo URL mostra direttamente la conferma e il polling già attivo completa.
+  Future<void> _reopenRegistration() async {
+    final url = _registrationUrl;
+    if (url == null) return;
+    try {
+      await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+    } catch (_) {
+      // se il browser non si apre, l'utente può comunque riprovare manualmente
     }
   }
 

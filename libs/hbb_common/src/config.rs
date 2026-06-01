@@ -2498,6 +2498,16 @@ pub fn is_incoming_only() -> bool {
 }
 
 #[inline]
+pub fn is_outgoing_allowed() -> bool {
+    // Eccezione all'incoming-only: gli admin Green4You devono poter avviare la
+    // connessione in USCITA verso il collaboratore (orchestrata dal bottone
+    // "Assisti" / deep-link connect). Il client Flutter imposta questo flag
+    // locale a "Y" quando il device è associato a un utente admin (is_admin).
+    // La UI resta comunque appliance (is_incoming_only non cambia).
+    LocalConfig::get_option("g4y-allow-outgoing") == "Y"
+}
+
+#[inline]
 pub fn is_outgoing_only() -> bool {
     HARD_SETTINGS
         .read()

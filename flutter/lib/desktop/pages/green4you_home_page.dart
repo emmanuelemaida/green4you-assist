@@ -119,6 +119,17 @@ class _Green4YouHomePageState extends State<Green4YouHomePage> {
       _state = registered ? ApplianceState.idle : ApplianceState.unregistered;
     });
     if (registered && isAdmin) _startQueuePolling();
+    await _syncOutgoingFlag(isAdmin);
+  }
+
+  /// Sblocca/blocca la connessione in USCITA nel core RustDesk in base al ruolo.
+  /// Il core è in incoming-only (appliance): senza questo flag, client.rs rifiuta
+  /// ogni connect() con "Incoming only mode". Solo gli admin devono poter avviare
+  /// la sessione verso il collaboratore, quindi impostiamo il flag a "Y" solo per
+  /// loro. Letto da config::is_outgoing_allowed().
+  Future<void> _syncOutgoingFlag(bool isAdmin) async {
+    await bind.mainSetLocalOption(
+        key: 'g4y-allow-outgoing', value: isAdmin ? 'Y' : '');
   }
 
   /// Restituisce l'ID RustDesk (9-10 cifre) generato dal core. Dopo un'installazione
@@ -811,6 +822,7 @@ class _Green4YouHomePageState extends State<Green4YouHomePage> {
               _state = ApplianceState.idle;
             });
             if (isAdmin) _startQueuePolling();
+            await _syncOutgoingFlag(isAdmin);
           } catch (e) {
             setState(() => _registering = false);
             _showError('Salvataggio credenziali (Keychain): $e');
@@ -974,6 +986,7 @@ class _Green4YouHomePageState extends State<Green4YouHomePage> {
             onPressed: () async {
               Navigator.of(context).pop();
               await Green4YouStore.clear();
+              await _syncOutgoingFlag(false);
               _queueTimer?.cancel();
               if (!mounted) return;
               setState(() {

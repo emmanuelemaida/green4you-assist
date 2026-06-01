@@ -247,7 +247,7 @@ impl Client {
         (i32, String),
         bool,
     )> {
-        if config::is_incoming_only() {
+        if config::is_incoming_only() && !config::is_outgoing_allowed() {
             bail!("Incoming only mode");
         }
         // to-do: remember the port for each peer, so that we can retry easier
